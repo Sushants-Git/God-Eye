@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createServer } from "node:http";
 
 import express from "express";
@@ -37,6 +39,95 @@ const ingestSchema = z.object({
 const aiSearchSchema = z.object({
   query: z.string().min(2)
 });
+
+const focusSchema = z.object({
+  sessionId: z.string().min(1)
+});
+
+const execFileAsync = promisify(execFile);
+
+/* ── Icon extraction (macOS only) ── */
+const iconCache = new Map<string, Buffer | null>();
+const iconInFlight = new Map<string, Promise<Buffer | null>>();
+
+const extractMacIcon = async (bundleId: string, appName: string): Promise<Buffer | null> => {
+  const key = (bundleId || appName).toLowerCase().replace(/[^a-z0-9.]/g, "");
+  if (iconCache.has(key)) return iconCache.get(key) ?? null;
+  if (iconInFlight.has(key)) return iconInFlight.get(key) ?? null;
+
+  const work = (async (): Promise<Buffer | null> => {
+    try {
+      let appPath: string | null = null;
+
+      // Resolve app bundle path
+      if (bundleId) {
+        try {
+          const { stdout } = await execFileAsync("osascript", [
+            "-e", `POSIX path of (path to application id "${bundleId}")`
+          ], { timeout: 2500 });
+          appPath = stdout.trim().replace(/\/$/, "");
+        } catch { /* try by name next */ }
+      }
+
+      if (!appPath && appName) {
+        try {
+          const { stdout } = await execFileAsync("osascript", [
+            "-e", `POSIX path of (path to application "${appName}")`
+          ], { timeout: 2500 });
+          appPath = stdout.trim().replace(/\/$/, "");
+        } catch { /* no path found */ }
+      }
+
+      if (!appPath) return null;
+
+      // Read icon name from Info.plist
+      let iconName = "AppIcon";
+      try {
+        const { stdout } = await execFileAsync("/usr/libexec/PlistBuddy", [
+          "-c", "Print :CFBundleIconFile",
+          `${appPath}/Contents/Info.plist`
+        ], { timeout: 1000 });
+        iconName = stdout.trim().replace(/\.icns$/, "");
+      } catch { /* use default name */ }
+
+      const resourcesDir = `${appPath}/Contents/Resources`;
+      const candidates = [
+        `${resourcesDir}/${iconName}.icns`,
+        `${resourcesDir}/${iconName}`,
+        `${resourcesDir}/AppIcon.icns`,
+        `${resourcesDir}/app.icns`,
+      ];
+
+      const tmpPath = `/tmp/goodeye_icon_${key}.png`;
+
+      for (const icnsPath of candidates) {
+        if (!fs.existsSync(icnsPath)) continue;
+        try {
+          await execFileAsync("sips", [
+            "-s", "format", "png", "-Z", "128",
+            icnsPath, "--out", tmpPath
+          ], { timeout: 3000 });
+          const buf = await fs.promises.readFile(tmpPath);
+          fs.promises.unlink(tmpPath).catch(() => {});
+          iconCache.set(key, buf);
+          return buf;
+        } catch { /* try next candidate */ }
+      }
+
+      return null;
+    } catch {
+      return null;
+    } finally {
+      iconInFlight.delete(key);
+    }
+  })();
+
+  iconInFlight.set(key, work);
+  iconCache.set(key, null); // optimistic null until resolved
+  const result = await work;
+  iconCache.set(key, result);
+  return result;
+};
 
 const httpServer = createServer(app);
 const websocketServer = new WebSocketServer({ server: httpServer, path: "/ws" });
@@ -88,6 +179,84 @@ app.post("/api/ingest", async (request, response) => {
   const session = ingestSessionEvent(parsed.data as IngestPayload);
   await broadcastState();
   response.json({ ok: true, session });
+});
+
+app.get("/api/icon", async (request, response) => {
+  const bundleId = String(request.query.bundleId ?? "").trim();
+  const appName = String(request.query.appName ?? "").trim();
+
+  if (!bundleId && !appName) {
+    response.status(400).end();
+    return;
+  }
+
+  // Set cache headers so browsers don't re-fetch on every render
+  response.setHeader("Cache-Control", "public, max-age=86400");
+
+  const buf = await extractMacIcon(bundleId, appName);
+  if (!buf) {
+    response.status(404).end();
+    return;
+  }
+
+  response.setHeader("Content-Type", "image/png");
+  response.send(buf);
+});
+
+app.post("/api/windows/focus", async (request, response) => {
+  if (process.platform !== "darwin") {
+    response.status(400).json({ error: "Window focus is only supported on macOS." });
+    return;
+  }
+
+  const parsed = focusSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "sessionId is required." });
+    return;
+  }
+
+  const sessionDetails = await getSessionDetails(parsed.data.sessionId);
+  if (!sessionDetails.session) {
+    response.status(404).json({ error: "Session not found." });
+    return;
+  }
+
+  const { session } = sessionDetails;
+  const appName = session.appDisplayName || session.terminalProgram;
+  const windowTitle = session.title;
+
+  if (!appName) {
+    response.status(400).json({ error: "No app name available for this session." });
+    return;
+  }
+
+  // JXA: raise a specific window by title, then activate the app
+  const script = `
+    const systemEvents = Application("System Events");
+    const appName = ${JSON.stringify(appName)};
+    const windowTitle = ${JSON.stringify(windowTitle)};
+    const processes = systemEvents.applicationProcesses.whose({ name: appName })();
+    if (processes.length > 0) {
+      const proc = processes[0];
+      if (windowTitle) {
+        const wins = proc.windows.whose({ name: windowTitle })();
+        if (wins.length > 0) {
+          try { wins[0].actions["AXRaise"].perform(); } catch(e) {}
+        }
+      }
+      proc.frontmost = true;
+    }
+    Application(appName).activate();
+    true;
+  `.trim();
+
+  try {
+    await execFileAsync("osascript", ["-l", "JavaScript", "-e", script], { timeout: 3000 });
+    response.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Focus failed";
+    response.status(500).json({ error: message });
+  }
 });
 
 app.post("/api/ai/search", async (request, response) => {

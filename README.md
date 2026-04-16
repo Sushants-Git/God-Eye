@@ -86,7 +86,7 @@ On macOS, the server can keep the local store populated by polling visible windo
 
 ```bash
 export TERMINAL_SCOUT_MAC_WINDOWS=1
-export TERMINAL_SCOUT_MAC_WINDOWS_POLL_MS=3000
+export TERMINAL_SCOUT_MAC_WINDOWS_POLL_MS=2000
 ```
 
 This collector stores only window metadata:

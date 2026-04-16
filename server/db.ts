@@ -136,6 +136,12 @@ const deleteSessionStatement = database.prepare(`
   WHERE session_id = ?
 `);
 
+const deleteStaleSessionsByPrefixStatement = database.prepare(`
+  DELETE FROM sessions
+  WHERE session_id LIKE ?
+    AND last_seen_at < ?
+`);
+
 const listEventsStatement = database.prepare(`
   SELECT
     id,
@@ -287,7 +293,7 @@ const mapSessionRow = (row: Record<string, unknown>): SessionRecord => ({
   hostname: String(row.hostname ?? ""),
   pid: typeof row.pid === "number" ? row.pid : null,
   lastCommand: String(row.last_command ?? ""),
-  status: row.status === "running" ? "running" : "idle",
+  status: row.status === "running" ? "running" : row.status === "minimized" ? "minimized" : "idle",
   startedAt: Number(row.started_at ?? Date.now()),
   lastSeenAt: Number(row.last_seen_at ?? Date.now()),
   commandCount: Number(row.command_count ?? 0),
@@ -384,7 +390,7 @@ const mergeRecentFiles = (current: string[], incoming: string[]): string[] => {
 };
 
 const summarizeEvent = (payload: IngestPayload, files: string[]): string => {
-  const parts = [payload.eventType.replaceAll("_", " "), payload.cwd];
+  const parts = [payload.eventType.replace(/_/g, " "), payload.cwd];
 
   if (payload.command) {
     parts.push(payload.command);
@@ -544,4 +550,22 @@ export const syncPrefixedSessions = (prefix: string, sessions: SessionRecord[]):
     deleteEventsForSessionStatement.run(sessionId);
     deleteSessionStatement.run(sessionId);
   }
+};
+
+/**
+ * Upsert sessions without deleting absent ones.
+ * Stale sessions (not seen for > gracePeriodMs) are pruned separately.
+ */
+export const upsertPrefixedSessions = (
+  prefix: string,
+  sessions: SessionRecord[],
+  gracePeriodMs = 60_000
+): void => {
+  for (const session of sessions) {
+    upsertSessionRecord(session);
+  }
+
+  // Remove sessions that haven't been polled within the grace period
+  const cutoff = Date.now() - gracePeriodMs;
+  deleteStaleSessionsByPrefixStatement.run(`${prefix}%`, cutoff);
 };

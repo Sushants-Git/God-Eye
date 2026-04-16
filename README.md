@@ -1,6 +1,6 @@
-# Terminal Scout
+# God Eye
 
-Terminal Scout turns a pile of terminal and app windows into a live local task map.
+God Eye turns a pile of terminal and app windows into a live local task map.
 
 It can run in three source modes:
 
@@ -106,7 +106,7 @@ export OPENAI_MODEL="gpt-5-mini"
 
 ## Use an Existing Local Metadata Server
 
-If you already have a local server that exposes session or window state, point Terminal Scout at it:
+If you already have a local server that exposes session or window state, point God Eye at it:
 
 ```bash
 export TERMINAL_SCOUT_UPSTREAM_STATE_URL="http://127.0.0.1:PORT/your/state/route"

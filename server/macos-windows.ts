@@ -1,8 +1,9 @@
+import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { resolveAppMetadata } from "./app-metadata.js";
-import { upsertPrefixedSessions } from "./db.js";
+import { listSessions, upsertPrefixedSessions } from "./db.js";
 import type { SessionRecord } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -32,6 +33,121 @@ interface MacWindowRow {
   activeCommand: string;
   contentPreview: string;
 }
+
+const normalizeText = (value: string): string => value.trim().toLowerCase();
+
+const isGhosttySession = (session: SessionRecord): boolean =>
+  normalizeText(session.terminalProgram).includes("ghostty") ||
+  normalizeText(session.appIdentifier) === "com.mitchellh.ghostty" ||
+  normalizeText(session.appDisplayName) === "ghostty";
+
+const looksLikePath = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+
+  return (
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("~/") ||
+    trimmed.startsWith("./") ||
+    trimmed.startsWith("../") ||
+    trimmed.includes("/Users/") ||
+    trimmed.includes(path.sep)
+  );
+};
+
+const cleanGhosttyCommand = (value: string, cwd: string, title: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const normalized = normalizeText(trimmed);
+  if (normalized === normalizeText(cwd) || normalized === normalizeText(title)) {
+    return "";
+  }
+
+  if (looksLikePath(trimmed)) {
+    return "";
+  }
+
+  return trimmed;
+};
+
+const inferGhosttyCommand = (row: MacWindowRow): string =>
+  cleanGhosttyCommand(row.activeCommand, row.cwd, row.title) ||
+  cleanGhosttyCommand(row.title, row.cwd, row.title === row.activeCommand ? "" : row.title);
+
+const scoreGhosttyMatch = (row: MacWindowRow, session: SessionRecord): number => {
+  let score = 0;
+  const rowTitle = normalizeText(row.title);
+  const rowCwd = normalizeText(row.cwd);
+  const rowCommand = normalizeText(inferGhosttyCommand(row));
+  const sessionCwd = normalizeText(session.cwd);
+  const sessionRepo = normalizeText(session.repoRoot);
+  const sessionActive = normalizeText(session.activeCommand);
+  const sessionLast = normalizeText(session.lastCommand);
+
+  if (rowCwd && sessionCwd && rowCwd === sessionCwd) score += 120;
+  if (rowCwd && sessionRepo && rowCwd === sessionRepo) score += 80;
+  if (rowCwd && sessionRepo && rowCwd.startsWith(`${sessionRepo}/`)) score += 40;
+
+  if (rowCommand && sessionActive && rowCommand === sessionActive) score += 100;
+  else if (rowCommand && sessionLast && rowCommand === sessionLast) score += 80;
+  else if (rowCommand && sessionActive && sessionActive.includes(rowCommand)) score += 45;
+  else if (rowCommand && sessionLast && sessionLast.includes(rowCommand)) score += 35;
+
+  if (rowTitle && sessionActive && rowTitle === sessionActive) score += 70;
+  else if (rowTitle && sessionLast && rowTitle === sessionLast) score += 55;
+
+  if (session.status === "running") score += 15;
+
+  const ageMs = Math.max(0, Date.now() - session.lastSeenAt);
+  score += Math.max(0, 12 - Math.floor(ageMs / 2000));
+
+  return score;
+};
+
+const enrichGhosttyRows = (rows: MacWindowRow[]): SessionRecord[] => {
+  const now = Date.now();
+  const ingestSessions = listSessions().filter(
+    (session) => !session.sessionId.startsWith(sessionPrefix) && isGhosttySession(session)
+  );
+
+  return rows.map((row) => {
+    const meta = resolveAppMetadata({
+      terminalProgram: row.terminalProgram,
+      appIdentifier: row.bundleId,
+      title: row.title
+    });
+    const baseCommand = inferGhosttyCommand(row);
+    const bestMatch = normalizeText(row.terminalProgram).includes("ghostty")
+      ? ingestSessions
+          .map((session) => ({ session, score: scoreGhosttyMatch(row, session) }))
+          .filter((candidate) => candidate.score >= 80)
+          .sort((left, right) => right.score - left.score)[0]?.session
+      : undefined;
+
+    return {
+      ...meta,
+      sessionId: row.sessionId,
+      title: row.title,
+      terminalProgram: row.terminalProgram,
+      cwd: row.cwd || bestMatch?.cwd || "",
+      repoRoot: bestMatch?.repoRoot ?? "",
+      gitBranch: bestMatch?.gitBranch ?? "",
+      tty: bestMatch?.tty ?? "",
+      shell: bestMatch?.shell ?? "",
+      hostname: bestMatch?.hostname ?? "",
+      pid: row.pid,
+      lastCommand: bestMatch?.lastCommand ?? "",
+      activeCommand: bestMatch?.activeCommand || baseCommand,
+      status: row.status,
+      startedAt: bestMatch?.startedAt ?? now,
+      lastSeenAt: now,
+      commandCount: bestMatch?.commandCount ?? 0,
+      recentFiles: bestMatch?.recentFiles ?? [],
+      contentPreview: row.contentPreview || bestMatch?.contentPreview || undefined,
+    };
+  });
+};
 
 // Collect ALL foreground app windows across all Spaces.
 // We intentionally skip the visible() check so windows on other desktops
@@ -125,43 +241,19 @@ for (const proc of processes) {
 JSON.stringify({ windows });
 `.trim();
 
-const normalizeRowsToSessions = (rows: MacWindowRow[]): SessionRecord[] => {
-  const now = Date.now();
-
-  return rows.map((row) => {
-    const meta = resolveAppMetadata({
-      terminalProgram: row.terminalProgram,
-      appIdentifier: row.bundleId,
-      title: row.title
-    });
-
-    return {
-      ...meta,
-      sessionId: row.sessionId,
-      title: row.title,
-      terminalProgram: row.terminalProgram,
-      cwd: row.cwd,
-      repoRoot: "",
-      gitBranch: "",
-      tty: "",
-      shell: "",
-      hostname: "",
-      pid: row.pid,
-      lastCommand: "",
-      activeCommand: row.activeCommand,
-      status: row.status,
-      startedAt: now,
-      lastSeenAt: now,
-      commandCount: 0,
-      recentFiles: [],
-      contentPreview: row.contentPreview || undefined,
-    };
-  });
-};
-
-const signatureFor = (rows: MacWindowRow[]): string =>
+const signatureFor = (sessions: SessionRecord[]): string =>
   JSON.stringify(
-    rows.map((row) => [row.sessionId, row.title, row.terminalProgram, row.bundleId, row.status, row.pid])
+    sessions.map((session) => [
+      session.sessionId,
+      session.title,
+      session.terminalProgram,
+      session.appIdentifier,
+      session.status,
+      session.pid,
+      session.cwd,
+      session.activeCommand,
+      session.lastCommand
+    ])
   );
 
 const pollWindows = async (): Promise<MacWindowRow[]> => {
@@ -199,8 +291,9 @@ const syncWindows = async (onChange: () => void): Promise<void> => {
 
   try {
     const rows = await pollWindows();
-    const nextSignature = signatureFor(rows);
-    upsertPrefixedSessions(sessionPrefix, normalizeRowsToSessions(rows), 60_000);
+    const sessions = enrichGhosttyRows(rows);
+    const nextSignature = signatureFor(sessions);
+    upsertPrefixedSessions(sessionPrefix, sessions, 60_000);
     lastSyncAt = Date.now();
     lastError = "";
 

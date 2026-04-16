@@ -1,0 +1,46 @@
+{
+  "name": "vee-is-gay",
+  "version": "0.1.0",
+  "description": "Local-first terminal window tracker with a live web dashboard and AI search.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,web \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build && npm run build:server",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist-server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit"
+  },
+  "keywords": [
+    "terminal",
+    "dashboard",
+    "ai",
+    "sqlite",
+    "zsh"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "12.4.1",
+    "express": "5.1.0",
+    "openai": "6.3.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "ws": "8.18.3",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/express": "5.0.6",
+    "@types/node": "24.7.2",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "6.0.1",
+    "concurrently": "9.2.1",
+    "tsx": "4.21.0",
+    "typescript": "6.0.2",
+    "vite": "8.0.8"
+  }
+}

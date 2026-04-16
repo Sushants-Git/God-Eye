@@ -49,13 +49,14 @@ const buildSearchBody = (session: SessionRecord): string => {
     session.repoRoot,
     session.gitBranch,
     session.lastCommand,
-    session.recentFiles.join(" ")
+    session.recentFiles.join(" "),
+    session.contentPreview ?? ""
   ]
     .filter(Boolean)
     .join(" ");
 };
 
-export const rankSessions = (query: string, sessions: SessionRecord[]): SearchMatch[] => {
+export const rankAllSessions = (query: string, sessions: SessionRecord[]): SearchMatch[] => {
   const normalizedQuery = query.trim().toLowerCase();
   const queryTokens = tokenize(normalizedQuery);
 
@@ -73,6 +74,7 @@ export const rankSessions = (query: string, sessions: SessionRecord[]): SearchMa
       score += scoreText(token, session.gitBranch, 8);
       score += scoreText(token, session.lastCommand, 8);
       score += scoreText(token, session.recentFiles.join(" "), 9);
+      score += scoreText(token, session.contentPreview ?? "", 8);
       score += scoreText(token, session.title, 6);
       score += scoreText(token, body, 4);
     }
@@ -96,8 +98,10 @@ export const rankSessions = (query: string, sessions: SessionRecord[]): SearchMa
     };
   });
 
-  return scored
-    .filter((match) => match.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 6);
+  return scored.sort((left, right) => right.score - left.score);
 };
+
+export const rankSessions = (query: string, sessions: SessionRecord[]): SearchMatch[] =>
+  rankAllSessions(query, sessions)
+    .filter((match) => match.score > 0)
+    .slice(0, 6);

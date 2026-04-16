@@ -269,8 +269,13 @@ app.post("/api/ai/search", async (request, response) => {
 
   const snapshot = await getStateSnapshot();
   const matches = rankSessions(parsed.data.query, snapshot.sessions);
+  const { answer: aiAnswer, prompt } = await explainWindowMatches(
+    parsed.data.query,
+    snapshot.sessions,
+    matches
+  );
   const answer =
-    (await explainWindowMatches(parsed.data.query, matches)) ??
+    aiAnswer ??
     (matches[0]
       ? `Best local match: ${matches[0].sessionId}. Search is currently using local ranking only.`
       : "No likely window match found yet. Try a repo name, branch, command, or file path.");
@@ -279,6 +284,7 @@ app.post("/api/ai/search", async (request, response) => {
     query: parsed.data.query,
     matches,
     mode: isAiEnabled() ? "ai" : "local",
+    prompt,
     answer,
     source: snapshot.source
   });

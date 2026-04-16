@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import type {
   EventRecord,
   SearchMatch,
+  SearchResponse,
   SessionRecord,
   SourceInfo,
   StateSnapshot,
@@ -440,7 +441,7 @@ function AiSearchBar({
   onError,
 }: {
   aiEnabled: boolean;
-  onResult: (query: string, answer: string, matches: SearchMatch[]) => void;
+  onResult: (query: string, result: SearchResponse) => void;
   onError: (msg: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -452,11 +453,11 @@ function AiSearchBar({
     if (!q || loading) return;
     setLoading(true);
     try {
-      const result = await apiFetch<{ answer: string; matches: SearchMatch[] }>(
+      const result = await apiFetch<SearchResponse>(
         "/api/ai/search",
         { method: "POST", body: JSON.stringify({ query: q }) }
       );
-      onResult(q, result.answer, result.matches);
+      onResult(q, result);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Search failed");
     } finally {
@@ -520,11 +521,14 @@ function AiSearchBar({
 
 /* ── SearchBanner ─────────────────────────────────────────── */
 function SearchBanner({
-  query, answer, matches, onSelect, onDismiss,
+  query, answer, matches, prompt, mode, onSelect, onDismiss,
 }: {
   query: string; answer: string; matches: SearchMatch[];
+  prompt: string | null; mode: SearchResponse["mode"];
   onSelect: (id: string) => void; onDismiss: () => void;
 }) {
+  const [showPrompt, setShowPrompt] = useState(false);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -6 }}
@@ -541,10 +545,35 @@ function SearchBanner({
           </p>
           <p className="text-[13px] text-[var(--ink)] leading-relaxed">{answer}</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={onDismiss} className="flex-none mt-0.5">
-          <X size={13} />
-        </Button>
+        <div className="flex items-center gap-1.5 flex-none mt-0.5">
+          {prompt && (
+            <button
+              type="button"
+              onClick={() => setShowPrompt((open) => !open)}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-[10px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[#f5edfa] hover:text-[var(--ink)]"
+            >
+              <FileText size={11} />
+              {showPrompt ? "Hide prompt" : "See prompt"}
+            </button>
+          )}
+          <Button variant="ghost" size="icon" onClick={onDismiss} className="flex-none">
+            <X size={13} />
+          </Button>
+        </div>
       </div>
+      {showPrompt && prompt && (
+        <div className="rounded-lg border border-[var(--border)] bg-[#fcf8ff] p-3 flex flex-col gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--ink-muted)]">
+            {mode === "ai" ? "Prompt sent to the LLM" : "Prompt prepared for the LLM"}
+          </p>
+          <p className="text-[11px] leading-relaxed text-[var(--ink-muted)]">
+            All available windows are included. Local ranking still runs first to provide ordering hints, and Ghostty or terminal windows include extra context like content previews when available.
+          </p>
+          <pre className="max-h-72 overflow-auto rounded-md border border-[var(--border)] bg-white p-3 text-[10px] leading-relaxed text-[var(--ink)] whitespace-pre-wrap break-words">
+            {prompt}
+          </pre>
+        </div>
+      )}
       {matches.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {matches.map((m) => (
@@ -574,6 +603,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [aiAnswer, setAiAnswer] = useState("");
   const [aiMatches, setAiMatches] = useState<SearchMatch[]>([]);
+  const [aiPrompt, setAiPrompt] = useState<string | null>(null);
+  const [searchMode, setSearchMode] = useState<SearchResponse["mode"]>("local");
   const deferredFilter = useDeferredValue(filterQuery);
 
   /* ── fetch state (no auto-select on first load) ── */
@@ -724,12 +755,14 @@ export default function App() {
         <div className="mt-auto p-3 border-t border-[var(--border)]">
           <AiSearchBar
             aiEnabled={snapshot?.aiEnabled ?? false}
-            onResult={(q, answer, matches) => {
+            onResult={(q, result) => {
               setSearchQuery(q);
-              setAiAnswer(answer);
-              setAiMatches(matches);
-              if (matches[0]) {
-                setSelectedId(matches[0].sessionId);
+              setAiAnswer(result.answer);
+              setAiMatches(result.matches);
+              setAiPrompt(result.prompt);
+              setSearchMode(result.mode);
+              if (result.matches[0]) {
+                setSelectedId(result.matches[0].sessionId);
               }
             }}
             onError={setError}
@@ -764,8 +797,16 @@ export default function App() {
           <AnimatePresence>
             {searchQuery && (
               <SearchBanner
-                query={searchQuery} answer={aiAnswer} matches={aiMatches}
-                onSelect={setSelectedId} onDismiss={() => setSearchQuery("")}
+                query={searchQuery}
+                answer={aiAnswer}
+                matches={aiMatches}
+                prompt={aiPrompt}
+                mode={searchMode}
+                onSelect={setSelectedId}
+                onDismiss={() => {
+                  setSearchQuery("");
+                  setAiPrompt(null);
+                }}
               />
             )}
           </AnimatePresence>

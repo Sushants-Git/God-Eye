@@ -39,6 +39,13 @@ export interface SearchMatch {
   excerpt: string;
 }
 
+export interface SearchResponse {
+  answer: string;
+  matches: SearchMatch[];
+  mode: "ai" | "local";
+  prompt: string | null;
+}
+
 export interface SourceInfo {
   mode: "sqlite" | "upstream" | "macos-windows";
   description: string;

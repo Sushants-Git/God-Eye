@@ -2,12 +2,60 @@ import path from "node:path";
 
 import type { SearchMatch, SessionRecord } from "./types.js";
 
+const STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "any",
+  "app",
+  "around",
+  "do",
+  "for",
+  "find",
+  "kind",
+  "like",
+  "maybe",
+  "of",
+  "open",
+  "related",
+  "show",
+  "some",
+  "something",
+  "someting",
+  "stuff",
+  "the",
+  "thing",
+  "to",
+  "want",
+  "with",
+  "window"
+]);
+
+const QUERY_EXPANSIONS: Record<string, string[]> = {
+  "3d": ["3d", "3-d", "3d printing", "printer", "printing", "slicer", "cad", "mesh", "model"],
+  "browser": ["browser", "web", "firefox", "chrome", "safari", "arc"],
+  "video": ["video", "movie", "media", "vlc", "mpv"],
+  "music": ["music", "audio", "spotify", "apple music"],
+};
+
 const tokenize = (value: string): string[] =>
   value
     .toLowerCase()
     .split(/[^a-z0-9._/-]+/)
     .map((token) => token.trim())
-    .filter((token) => token.length >= 2);
+    .filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
+
+const expandQueryTerms = (tokens: string[]): string[] => {
+  const expanded = new Set(tokens);
+
+  for (const token of tokens) {
+    for (const alias of QUERY_EXPANSIONS[token] ?? []) {
+      expanded.add(alias);
+    }
+  }
+
+  return [...expanded];
+};
 
 const scoreText = (needle: string, haystack: string, weight: number): number => {
   if (!needle || !haystack) {
@@ -33,7 +81,11 @@ const buildSessionSummary = (session: SessionRecord): string => {
   } in ${session.cwd}${
     repoName ? ` for repo ${repoName}` : ""
   }${session.gitBranch ? ` on ${session.gitBranch}` : ""}${
-    session.lastCommand ? ` running or last used: ${session.lastCommand}` : ""
+    session.activeCommand
+      ? ` currently running: ${session.activeCommand}`
+      : session.lastCommand
+        ? ` last used: ${session.lastCommand}`
+        : ""
   }`;
 };
 
@@ -48,6 +100,7 @@ const buildSearchBody = (session: SessionRecord): string => {
     session.cwd,
     session.repoRoot,
     session.gitBranch,
+    session.activeCommand,
     session.lastCommand,
     session.recentFiles.join(" "),
     session.contentPreview ?? ""
@@ -58,11 +111,20 @@ const buildSearchBody = (session: SessionRecord): string => {
 
 export const rankAllSessions = (query: string, sessions: SessionRecord[]): SearchMatch[] => {
   const normalizedQuery = query.trim().toLowerCase();
-  const queryTokens = tokenize(normalizedQuery);
+  const queryTokens = expandQueryTerms(tokenize(normalizedQuery));
 
   const scored = sessions.map((session) => {
     const body = buildSearchBody(session);
     const repoName = session.repoRoot ? path.basename(session.repoRoot) : "";
+    const appText = [
+      session.appDisplayName,
+      session.appDescription,
+      session.appIdentifier,
+      session.title
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
     let score = scoreText(normalizedQuery, body, 14);
 
     for (const token of queryTokens) {
@@ -72,6 +134,7 @@ export const rankAllSessions = (query: string, sessions: SessionRecord[]): Searc
       score += scoreText(token, session.appDescription, 9);
       score += scoreText(token, session.appIdentifier, 8);
       score += scoreText(token, session.gitBranch, 8);
+      score += scoreText(token, session.activeCommand, 11);
       score += scoreText(token, session.lastCommand, 8);
       score += scoreText(token, session.recentFiles.join(" "), 9);
       score += scoreText(token, session.contentPreview ?? "", 8);
@@ -79,13 +142,17 @@ export const rankAllSessions = (query: string, sessions: SessionRecord[]): Searc
       score += scoreText(token, body, 4);
     }
 
+    if (queryTokens.includes("3d") && /\b(3d|3-d|printer|printing|slicer|cad|mesh|model)\b/.test(appText)) {
+      score += 24;
+    }
+
     if (score === 0) {
-      const lastCommand = session.lastCommand.toLowerCase();
-      if (normalizedQuery.includes("server") && /(dev|serve|start|node|pnpm|npm run)/.test(lastCommand)) {
+      const currentCommand = (session.activeCommand || session.lastCommand).toLowerCase();
+      if (normalizedQuery.includes("server") && /(dev|serve|start|node|pnpm|npm run)/.test(currentCommand)) {
         score += 6;
       }
 
-      if (normalizedQuery.includes("test") && /(test|vitest|jest|playwright)/.test(lastCommand)) {
+      if (normalizedQuery.includes("test") && /(test|vitest|jest|playwright)/.test(currentCommand)) {
         score += 6;
       }
     }

@@ -45,6 +45,7 @@ const formatSessionForPrompt = (
     formatPromptField("cwd", session.cwd),
     formatPromptField("repo_root", session.repoRoot),
     formatPromptField("git_branch", session.gitBranch),
+    formatPromptField("active_command", session.activeCommand),
     formatPromptField("last_command", session.lastCommand),
     formatPromptField("recent_files", session.recentFiles.join(", ")),
     formatPromptField("content_preview", session.contentPreview),
@@ -54,7 +55,7 @@ const formatSessionForPrompt = (
   ].filter((line): line is string => Boolean(line));
 
   if (session.terminalProgram.toLowerCase().includes("ghostty")) {
-    lines.push("terminal_hint=Ghostty window. Treat content_preview, cwd, repo_root, git_branch, and last_command as strong signals.");
+    lines.push("terminal_hint=Ghostty window. Treat active_command, content_preview, cwd, repo_root, git_branch, and last_command as strong signals.");
   } else if (session.contentPreview) {
     lines.push("terminal_hint=Terminal content preview is available and should be used as a strong signal.");
   }
@@ -83,9 +84,11 @@ export const buildWindowSearchPrompt = (
   return `
 You help a developer find the right terminal window from local session metadata.
 You must choose from the available windows only.
-Pick the strongest match first and keep the reply concise.
+Pick exactly one strongest match.
 When the query names a specific app, title, repo, command, or file, prefer exact metadata matches.
-For Ghostty and other terminal windows, pay special attention to cwd, repo_root, git_branch, last_command, recent_files, and content_preview.
+Ignore filler phrasing such as "something", "to do with", "kind of", or "maybe".
+Prefer positive local_score windows. Only pick a local_score=0 window if its app_name or app_description is still an obvious semantic match.
+For Ghostty and other terminal windows, pay special attention to active_command, cwd, repo_root, git_branch, last_command, recent_files, and content_preview.
 Use session ids exactly as written.
 
 User query:
@@ -107,9 +110,11 @@ ${orderedSessions
     .map((session, index) => formatSessionForPrompt(session, index, rankedMap.get(session.sessionId)))
     .join("\n\n")}
 
-Answer in at most 3 short sentences.
-Mention the best session id in the first sentence.
-Only mention a runner-up if it is genuinely useful.
+Return exactly one short sentence in this format:
+<app_name> - <session_id>
+
+Do not ask follow-up questions.
+Do not offer to focus or switch windows.
 `.trim();
 };
 

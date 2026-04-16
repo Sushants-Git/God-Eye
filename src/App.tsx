@@ -179,8 +179,15 @@ function WindowCard({
         </div>
       )}
 
+      {/* Active command */}
+      {session.activeCommand && (
+        <code className="block text-[10px] font-mono bg-[rgba(162,59,103,0.09)] text-[var(--brand)] rounded-md px-2.5 py-1.5 truncate">
+          now: {session.activeCommand}
+        </code>
+      )}
+
       {/* Last command */}
-      {session.lastCommand && (
+      {!session.activeCommand && session.lastCommand && (
         <code className="block text-[10px] font-mono bg-[#f5edfa] text-[#7a4a7a] rounded-md px-2.5 py-1.5 truncate">
           {session.lastCommand}
         </code>
@@ -302,8 +309,15 @@ function DetailPanel({
               )}
             </MetaCell>
           )}
+          {session.activeCommand && (
+            <MetaCell label="Running now" span2>
+              <code className="text-[11px] font-mono text-[var(--brand)] break-all leading-relaxed">
+                {session.activeCommand}
+              </code>
+            </MetaCell>
+          )}
           {session.lastCommand && (
-            <MetaCell label="Last command" span2>
+            <MetaCell label={session.activeCommand ? "Last command" : "Command"} span2>
               <code className="text-[11px] font-mono text-[#7a4a7a] break-all leading-relaxed">
                 {session.lastCommand}
               </code>
@@ -692,7 +706,7 @@ export default function App() {
         [
           s.sessionId, s.title, s.terminalProgram, s.appIdentifier,
           s.appDisplayName, s.appDescription, s.cwd, s.repoRoot,
-          s.gitBranch, s.lastCommand, s.recentFiles.join(" "),
+          s.gitBranch, s.activeCommand, s.lastCommand, s.recentFiles.join(" "),
           s.contentPreview ?? "",
         ].join(" ").toLowerCase().includes(norm)
       )

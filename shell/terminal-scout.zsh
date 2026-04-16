@@ -27,6 +27,7 @@ terminal_scout_post() {
 
   local event_type="$1"
   local command_text="$2"
+  local active_command="$3"
   local repo_root
   local branch
 
@@ -38,6 +39,7 @@ terminal_scout_post() {
     --data-urlencode "eventType=${event_type}" \
     --data-urlencode "cwd=${PWD}" \
     --data-urlencode "command=${command_text}" \
+    --data-urlencode "activeCommand=${active_command}" \
     --data-urlencode "title=${TERMINAL_TITLE:-${PWD:t}}" \
     --data-urlencode "terminalProgram=${TERM_PROGRAM:-terminal}" \
     --data-urlencode "tty=${TTY}" \
@@ -51,24 +53,23 @@ terminal_scout_post() {
 
 terminal_scout_preexec() {
   TERMINAL_SCOUT_LAST_COMMAND="$1"
-  terminal_scout_post "command_start" "$1"
+  terminal_scout_post "command_start" "$1" "$1"
 }
 
 terminal_scout_precmd() {
-  terminal_scout_post "prompt" "${TERMINAL_SCOUT_LAST_COMMAND}"
+  terminal_scout_post "prompt" "${TERMINAL_SCOUT_LAST_COMMAND}" ""
 }
 
 terminal_scout_chpwd() {
-  terminal_scout_post "cwd_change" "${TERMINAL_SCOUT_LAST_COMMAND}"
+  terminal_scout_post "cwd_change" "${TERMINAL_SCOUT_LAST_COMMAND}" ""
 }
 
 terminal_scout_bootstrap() {
   TERMINAL_SCOUT_SESSION_ID="$(terminal_scout_detect_session_id)"
-  terminal_scout_post "shell_start" ""
+  terminal_scout_post "shell_start" "" ""
 }
 
 add-zsh-hook preexec terminal_scout_preexec
 add-zsh-hook precmd terminal_scout_precmd
 add-zsh-hook chpwd terminal_scout_chpwd
 terminal_scout_bootstrap
-

@@ -5,6 +5,7 @@ export interface IngestPayload {
   eventType: EventType;
   cwd: string;
   command?: string;
+  activeCommand?: string;
   title?: string;
   terminalProgram?: string;
   appIdentifier?: string;
@@ -33,6 +34,7 @@ export interface SessionRecord {
   hostname: string;
   pid: number | null;
   lastCommand: string;
+  activeCommand: string;
   status: "idle" | "running" | "minimized";
   contentPreview?: string;
   startedAt: number;

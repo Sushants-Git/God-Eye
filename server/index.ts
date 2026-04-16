@@ -26,6 +26,7 @@ const ingestSchema = z.object({
   eventType: z.enum(["shell_start", "command_start", "prompt", "cwd_change"]),
   cwd: z.string().min(1),
   command: z.string().optional().default(""),
+  activeCommand: z.string().optional().default(""),
   title: z.string().optional().default(""),
   terminalProgram: z.string().optional().default(""),
   tty: z.string().optional().default(""),

@@ -28,6 +28,8 @@ interface MacWindowRow {
   bundleId: string;
   pid: number | null;
   status: "idle" | "running" | "minimized";
+  cwd: string;
+  activeCommand: string;
   contentPreview: string;
 }
 
@@ -65,11 +67,33 @@ for (const proc of processes) {
   }
 
   const isTerminal = TERMINAL_APPS.some(t => appName.toLowerCase().includes(t));
+  const isGhostty = appName.toLowerCase().includes("ghostty");
 
   titles.forEach((title, index) => {
     const isMinimized = Array.isArray(minimizedStates) && minimizedStates[index] === true;
     let status = isMinimized ? "minimized" : (isFrontmost && index === 0 ? "running" : "idle");
+    let cwd = "";
+    let activeCommand = "";
     let contentPreview = "";
+
+    if (isGhostty && !isMinimized) {
+      try {
+        const ghostty = Application(appName);
+        const ghostWindow = ghostty.windows[index];
+        const selectedTab = ghostWindow.selectedTab();
+        const focusedTerminal = selectedTab.focusedTerminal();
+        const terminalName = focusedTerminal.name();
+        const workingDirectory = focusedTerminal.workingDirectory();
+
+        if (typeof terminalName === "string" && terminalName.length > 0) {
+          activeCommand = terminalName.trim();
+        }
+
+        if (typeof workingDirectory === "string" && workingDirectory.length > 0) {
+          cwd = workingDirectory.trim();
+        }
+      } catch (e) {}
+    }
 
     if (${withContent} && isTerminal && !isMinimized) {
       try {
@@ -91,6 +115,8 @@ for (const proc of processes) {
       bundleId: bundleId || "",
       pid: pid !== null ? pid : null,
       status: status,
+      cwd: cwd,
+      activeCommand: activeCommand,
       contentPreview: contentPreview,
     });
   });
@@ -114,7 +140,7 @@ const normalizeRowsToSessions = (rows: MacWindowRow[]): SessionRecord[] => {
       sessionId: row.sessionId,
       title: row.title,
       terminalProgram: row.terminalProgram,
-      cwd: "",
+      cwd: row.cwd,
       repoRoot: "",
       gitBranch: "",
       tty: "",
@@ -122,6 +148,7 @@ const normalizeRowsToSessions = (rows: MacWindowRow[]): SessionRecord[] => {
       hostname: "",
       pid: row.pid,
       lastCommand: "",
+      activeCommand: row.activeCommand,
       status: row.status,
       startedAt: now,
       lastSeenAt: now,
@@ -157,11 +184,13 @@ const pollWindows = async (): Promise<MacWindowRow[]> => {
     const rawStatus = record.status;
     const status: MacWindowRow["status"] =
       rawStatus === "running" ? "running" : rawStatus === "minimized" ? "minimized" : "idle";
+    const cwd = typeof record.cwd === "string" ? record.cwd : "";
+    const activeCommand = typeof record.activeCommand === "string" ? record.activeCommand : "";
     const contentPreview = typeof record.contentPreview === "string" ? record.contentPreview : "";
 
     if (!sessionId) return [];
 
-    return [{ sessionId, title, terminalProgram, bundleId, pid, status, contentPreview }];
+    return [{ sessionId, title, terminalProgram, bundleId, pid, status, cwd, activeCommand, contentPreview }];
   });
 };
 

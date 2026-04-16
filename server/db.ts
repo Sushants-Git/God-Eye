@@ -69,6 +69,7 @@ const ensureSessionColumn = (name: string, definition: string): void => {
 ensureSessionColumn("app_identifier", "TEXT NOT NULL DEFAULT ''");
 ensureSessionColumn("app_display_name", "TEXT NOT NULL DEFAULT ''");
 ensureSessionColumn("app_description", "TEXT NOT NULL DEFAULT ''");
+ensureSessionColumn("active_command", "TEXT NOT NULL DEFAULT ''");
 
 const selectSessionStatement = database.prepare(`
   SELECT
@@ -86,6 +87,7 @@ const selectSessionStatement = database.prepare(`
     hostname,
     pid,
     last_command,
+    active_command,
     status,
     started_at,
     last_seen_at,
@@ -111,6 +113,7 @@ const listSessionsStatement = database.prepare(`
     hostname,
     pid,
     last_command,
+    active_command,
     status,
     started_at,
     last_seen_at,
@@ -189,6 +192,7 @@ const insertSessionStatement = database.prepare(`
     hostname,
     pid,
     last_command,
+    active_command,
     status,
     started_at,
     last_seen_at,
@@ -210,6 +214,7 @@ const insertSessionStatement = database.prepare(`
     @hostname,
     @pid,
     @lastCommand,
+    @activeCommand,
     @status,
     @startedAt,
     @lastSeenAt,
@@ -230,6 +235,7 @@ const insertSessionStatement = database.prepare(`
     hostname = excluded.hostname,
     pid = excluded.pid,
     last_command = excluded.last_command,
+    active_command = excluded.active_command,
     status = excluded.status,
     last_seen_at = excluded.last_seen_at,
     command_count = excluded.command_count,
@@ -293,6 +299,7 @@ const mapSessionRow = (row: Record<string, unknown>): SessionRecord => ({
   hostname: String(row.hostname ?? ""),
   pid: typeof row.pid === "number" ? row.pid : null,
   lastCommand: String(row.last_command ?? ""),
+  activeCommand: String(row.active_command ?? ""),
   status: row.status === "running" ? "running" : row.status === "minimized" ? "minimized" : "idle",
   startedAt: Number(row.started_at ?? Date.now()),
   lastSeenAt: Number(row.last_seen_at ?? Date.now()),
@@ -433,6 +440,9 @@ export const ingestSessionEvent = (payload: IngestPayload): SessionRecord => {
     hostname: payload.hostname ?? existingSession?.hostname ?? "",
     pid: payload.pid ?? existingSession?.pid ?? null,
     lastCommand: payload.command ?? existingSession?.lastCommand ?? "",
+    activeCommand:
+      payload.activeCommand ??
+      (payload.eventType === "command_start" ? payload.command ?? "" : ""),
     status,
     startedAt: existingSession?.startedAt ?? now,
     lastSeenAt: now,
@@ -519,6 +529,7 @@ export const upsertSessionRecord = (session: SessionRecord): SessionRecord => {
     hostname: session.hostname,
     pid: session.pid,
     lastCommand: session.lastCommand,
+    activeCommand: session.activeCommand,
     status: session.status,
     startedAt: existingSession?.startedAt ?? session.startedAt,
     lastSeenAt: session.lastSeenAt,

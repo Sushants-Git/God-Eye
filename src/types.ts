@@ -13,6 +13,7 @@ export interface SessionRecord {
   hostname: string;
   pid: number | null;
   lastCommand: string;
+  activeCommand: string;
   status: "idle" | "running" | "minimized";
   contentPreview?: string;
   startedAt: number;

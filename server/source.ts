@@ -82,6 +82,7 @@ const normalizeSession = (value: unknown, index: number): SessionRecord => {
     hostname: readString(record, ["hostname", "host"]),
     pid: Number.isFinite(pidValue) ? pidValue : null,
     lastCommand: readString(record, ["lastCommand", "last_command", "command"]),
+    activeCommand: readString(record, ["activeCommand", "active_command", "runningCommand", "running_command"]),
     status: running ? "running" : "idle",
     startedAt: readNumber(record, ["startedAt", "started_at"], now),
     lastSeenAt: readNumber(record, ["lastSeenAt", "last_seen_at", "updatedAt", "updated_at"], now),
@@ -260,7 +261,8 @@ const signatureFor = (sessions: SessionRecord[]): string =>
       session.lastSeenAt,
       session.status,
       session.cwd,
-      session.lastCommand
+      session.lastCommand,
+      session.activeCommand
     ])
   );
 

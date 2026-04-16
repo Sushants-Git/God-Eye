@@ -3,4 +3,4 @@ dist
 dist-server
 .data
 .DS_Store
-
+.env

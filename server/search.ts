@@ -28,7 +28,9 @@ const buildSessionSummary = (session: SessionRecord): string => {
   const title = session.title ? `${session.title} ` : "";
   const repoName = session.repoRoot ? path.basename(session.repoRoot) : "";
 
-  return `${title}${session.terminalProgram || "terminal"} in ${session.cwd}${
+  return `${title}${session.appDisplayName || session.terminalProgram || "terminal"}${
+    session.appDescription ? ` (${session.appDescription})` : ""
+  } in ${session.cwd}${
     repoName ? ` for repo ${repoName}` : ""
   }${session.gitBranch ? ` on ${session.gitBranch}` : ""}${
     session.lastCommand ? ` running or last used: ${session.lastCommand}` : ""
@@ -40,6 +42,9 @@ const buildSearchBody = (session: SessionRecord): string => {
     session.sessionId,
     session.title,
     session.terminalProgram,
+    session.appIdentifier,
+    session.appDisplayName,
+    session.appDescription,
     session.cwd,
     session.repoRoot,
     session.gitBranch,
@@ -62,6 +67,9 @@ export const rankSessions = (query: string, sessions: SessionRecord[]): SearchMa
     for (const token of queryTokens) {
       score += scoreText(token, session.cwd, 10);
       score += scoreText(token, repoName, 10);
+      score += scoreText(token, session.appDisplayName, 10);
+      score += scoreText(token, session.appDescription, 9);
+      score += scoreText(token, session.appIdentifier, 8);
       score += scoreText(token, session.gitBranch, 8);
       score += scoreText(token, session.lastCommand, 8);
       score += scoreText(token, session.recentFiles.join(" "), 9);

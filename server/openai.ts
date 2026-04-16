@@ -46,6 +46,9 @@ Mention the best session id in the first sentence.
 Only mention a runner-up if it is genuinely useful.
 `.trim();
 
+  console.info(`[ai-search] query=${query}`);
+  console.info(`[ai-search] prompt\n${prompt}`);
+
   const response = await sdk.responses.create({
     model: process.env.OPENAI_MODEL ?? "gpt-5-mini",
     input: prompt
@@ -53,4 +56,3 @@ Only mention a runner-up if it is genuinely useful.
 
   return response.output_text?.trim() || null;
 };
-

@@ -45,7 +45,7 @@ The backend runs on `http://127.0.0.1:4321` and the Vite app runs on `http://127
 Add this to `~/.zshrc`:
 
 ```zsh
-source /Users/sushant/vee-is-gay/shell/terminal-scout.zsh
+source /Users/vee/God-Eye/shell/terminal-scout.zsh
 ```
 
 Then reload your shell:

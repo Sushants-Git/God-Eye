@@ -7,6 +7,9 @@ export interface IngestPayload {
   command?: string;
   title?: string;
   terminalProgram?: string;
+  appIdentifier?: string;
+  appDisplayName?: string;
+  appDescription?: string;
   tty?: string;
   shell?: string;
   hostname?: string;
@@ -19,6 +22,9 @@ export interface SessionRecord {
   sessionId: string;
   title: string;
   terminalProgram: string;
+  appIdentifier: string;
+  appDisplayName: string;
+  appDescription: string;
   cwd: string;
   repoRoot: string;
   gitBranch: string;

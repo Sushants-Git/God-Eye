@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { resolveAppMetadata } from "./app-metadata.js";
 import { syncPrefixedSessions } from "./db.js";
 import type { SessionRecord } from "./types.js";
 
@@ -23,6 +24,7 @@ interface MacWindowRow {
   sessionId: string;
   title: string;
   terminalProgram: string;
+  bundleId: string;
   pid: number | null;
   status: "idle" | "running";
 }
@@ -37,6 +39,7 @@ for (const process of processes) {
   let isVisible = false;
   let isFrontmost = false;
   let pid = null;
+  let bundleId = "";
   let titles = [];
 
   try { isVisible = process.visible(); } catch (error) {}
@@ -44,6 +47,7 @@ for (const process of processes) {
 
   try { isFrontmost = process.frontmost(); } catch (error) {}
   try { pid = process.unixId(); } catch (error) {}
+  try { bundleId = Application(appName).id(); } catch (error) {}
   try { titles = process.windows.name(); } catch (error) {}
 
   if (!Array.isArray(titles)) {
@@ -55,6 +59,7 @@ for (const process of processes) {
       sessionId: "mac-window:" + (pid || appName) + ":0",
       title: appName,
       terminalProgram: appName,
+      bundleId: bundleId || "",
       pid: pid || null,
       status: isFrontmost ? "running" : "idle"
     });
@@ -66,6 +71,7 @@ for (const process of processes) {
       sessionId: "mac-window:" + (pid || appName) + ":" + index,
       title: title || appName,
       terminalProgram: appName,
+      bundleId: bundleId || "",
       pid: pid || null,
       status: isFrontmost ? "running" : "idle"
     });
@@ -79,6 +85,11 @@ const normalizeRowsToSessions = (rows: MacWindowRow[]): SessionRecord[] => {
   const now = Date.now();
 
   return rows.map((row) => ({
+    ...resolveAppMetadata({
+      terminalProgram: row.terminalProgram,
+      appIdentifier: row.bundleId,
+      title: row.title
+    }),
     sessionId: row.sessionId,
     title: row.title,
     terminalProgram: row.terminalProgram,
@@ -100,7 +111,7 @@ const normalizeRowsToSessions = (rows: MacWindowRow[]): SessionRecord[] => {
 
 const signatureFor = (rows: MacWindowRow[]): string =>
   JSON.stringify(
-    rows.map((row) => [row.sessionId, row.title, row.terminalProgram, row.status, row.pid])
+    rows.map((row) => [row.sessionId, row.title, row.terminalProgram, row.bundleId, row.status, row.pid])
   );
 
 const pollWindows = async (): Promise<MacWindowRow[]> => {
@@ -120,6 +131,7 @@ const pollWindows = async (): Promise<MacWindowRow[]> => {
     const title = typeof record.title === "string" ? record.title : "";
     const terminalProgram =
       typeof record.terminalProgram === "string" ? record.terminalProgram : "Window";
+    const bundleId = typeof record.bundleId === "string" ? record.bundleId : "";
     const pid = typeof record.pid === "number" ? record.pid : null;
     const status = record.status === "running" ? "running" : "idle";
 
@@ -127,7 +139,7 @@ const pollWindows = async (): Promise<MacWindowRow[]> => {
       return [];
     }
 
-    return [{ sessionId, title, terminalProgram, pid, status }];
+    return [{ sessionId, title, terminalProgram, bundleId, pid, status }];
   });
 };
 

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 
+import { resolveAppMetadata } from "./app-metadata.js";
 import type { EventRecord, IngestPayload, SessionRecord } from "./types.js";
 
 const dataDir = path.join(process.cwd(), ".data");
@@ -50,11 +51,33 @@ database.exec(`
     ON events(session_id, created_at DESC);
 `);
 
+const existingSessionColumns = new Set(
+  (database.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map(
+    (column) => column.name
+  )
+);
+
+const ensureSessionColumn = (name: string, definition: string): void => {
+  if (existingSessionColumns.has(name)) {
+    return;
+  }
+
+  database.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
+  existingSessionColumns.add(name);
+};
+
+ensureSessionColumn("app_identifier", "TEXT NOT NULL DEFAULT ''");
+ensureSessionColumn("app_display_name", "TEXT NOT NULL DEFAULT ''");
+ensureSessionColumn("app_description", "TEXT NOT NULL DEFAULT ''");
+
 const selectSessionStatement = database.prepare(`
   SELECT
     session_id,
     title,
     terminal_program,
+    app_identifier,
+    app_display_name,
+    app_description,
     cwd,
     repo_root,
     git_branch,
@@ -77,6 +100,9 @@ const listSessionsStatement = database.prepare(`
     session_id,
     title,
     terminal_program,
+    app_identifier,
+    app_display_name,
+    app_description,
     cwd,
     repo_root,
     git_branch,
@@ -146,6 +172,9 @@ const insertSessionStatement = database.prepare(`
     session_id,
     title,
     terminal_program,
+    app_identifier,
+    app_display_name,
+    app_description,
     cwd,
     repo_root,
     git_branch,
@@ -164,6 +193,9 @@ const insertSessionStatement = database.prepare(`
     @sessionId,
     @title,
     @terminalProgram,
+    @appIdentifier,
+    @appDisplayName,
+    @appDescription,
     @cwd,
     @repoRoot,
     @gitBranch,
@@ -181,6 +213,9 @@ const insertSessionStatement = database.prepare(`
   ON CONFLICT(session_id) DO UPDATE SET
     title = excluded.title,
     terminal_program = excluded.terminal_program,
+    app_identifier = excluded.app_identifier,
+    app_display_name = excluded.app_display_name,
+    app_description = excluded.app_description,
     cwd = excluded.cwd,
     repo_root = excluded.repo_root,
     git_branch = excluded.git_branch,
@@ -241,6 +276,9 @@ const mapSessionRow = (row: Record<string, unknown>): SessionRecord => ({
   sessionId: String(row.session_id),
   title: String(row.title ?? ""),
   terminalProgram: String(row.terminal_program ?? ""),
+  appIdentifier: String(row.app_identifier ?? ""),
+  appDisplayName: String(row.app_display_name ?? ""),
+  appDescription: String(row.app_description ?? ""),
   cwd: String(row.cwd ?? ""),
   repoRoot: String(row.repo_root ?? ""),
   gitBranch: String(row.git_branch ?? ""),
@@ -366,11 +404,21 @@ export const ingestSessionEvent = (payload: IngestPayload): SessionRecord => {
   const files = extractFiles(payload.cwd, payload.command ?? "");
   const recentFiles = mergeRecentFiles(existingSession?.recentFiles ?? [], files);
   const status = payload.eventType === "command_start" ? "running" : "idle";
+  const appMetadata = resolveAppMetadata({
+    terminalProgram: payload.terminalProgram ?? existingSession?.terminalProgram,
+    appIdentifier: payload.appIdentifier ?? existingSession?.appIdentifier,
+    appDisplayName: payload.appDisplayName ?? existingSession?.appDisplayName,
+    appDescription: payload.appDescription ?? existingSession?.appDescription,
+    title: payload.title ?? existingSession?.title
+  });
 
   insertSessionStatement.run({
     sessionId: payload.sessionId,
     title: payload.title ?? existingSession?.title ?? "",
     terminalProgram: payload.terminalProgram ?? existingSession?.terminalProgram ?? "",
+    appIdentifier: appMetadata.appIdentifier,
+    appDisplayName: appMetadata.appDisplayName,
+    appDescription: appMetadata.appDescription,
     cwd: payload.cwd,
     repoRoot: payload.repoRoot ?? existingSession?.repoRoot ?? "",
     gitBranch: payload.gitBranch ?? existingSession?.gitBranch ?? "",
@@ -442,11 +490,21 @@ export const getLocalStoreStats = (): {
 export const upsertSessionRecord = (session: SessionRecord): SessionRecord => {
   const existingRow = selectSessionStatement.get(session.sessionId) as Record<string, unknown> | undefined;
   const existingSession = existingRow ? mapSessionRow(existingRow) : null;
+  const appMetadata = resolveAppMetadata({
+    terminalProgram: session.terminalProgram,
+    appIdentifier: session.appIdentifier,
+    appDisplayName: session.appDisplayName,
+    appDescription: session.appDescription,
+    title: session.title
+  });
 
   insertSessionStatement.run({
     sessionId: session.sessionId,
     title: session.title,
     terminalProgram: session.terminalProgram,
+    appIdentifier: appMetadata.appIdentifier,
+    appDisplayName: appMetadata.appDisplayName,
+    appDescription: appMetadata.appDescription,
     cwd: session.cwd,
     repoRoot: session.repoRoot,
     gitBranch: session.gitBranch,

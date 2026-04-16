@@ -1,4 +1,5 @@
 import { getDatabasePath, getLocalStoreStats, getSession, listSessions } from "./db.js";
+import { resolveAppMetadata } from "./app-metadata.js";
 import { getMacWindowCollectorState } from "./macos-windows.js";
 import type { EventRecord, SessionRecord, SourceInfo, StateSnapshot } from "./types.js";
 
@@ -58,11 +59,21 @@ const normalizeSession = (value: unknown, index: number): SessionRecord => {
   const pidValue = readNumber(record, ["pid"], Number.NaN);
   const running =
     record.running === true || readString(record, ["status"], "").toLowerCase() === "running";
+  const appMetadata = resolveAppMetadata({
+    terminalProgram: readString(record, ["terminalProgram", "terminal_program", "terminal", "app"]),
+    appIdentifier: readString(record, ["appIdentifier", "app_identifier", "bundleId", "bundle_id"]),
+    appDisplayName: readString(record, ["appDisplayName", "app_display_name", "appName", "app_name"]),
+    appDescription: readString(record, ["appDescription", "app_description"]),
+    title: readString(record, ["title", "name"])
+  });
 
   return {
     sessionId: readString(record, ["sessionId", "session_id", "id"], `session-${index}`),
     title: readString(record, ["title", "name"]),
     terminalProgram: readString(record, ["terminalProgram", "terminal_program", "terminal", "app"]),
+    appIdentifier: appMetadata.appIdentifier,
+    appDisplayName: appMetadata.appDisplayName,
+    appDescription: appMetadata.appDescription,
     cwd: readString(record, ["cwd", "workingDirectory", "working_directory"]),
     repoRoot: readString(record, ["repoRoot", "repo_root"]),
     gitBranch: readString(record, ["gitBranch", "git_branch", "branch"]),
